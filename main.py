@@ -27,6 +27,7 @@ def check_janpara_gold(jan):
             text = item.get_text()
             if any(x in text for x in ["保証なし", "ジャンク", "JUNK", "難あり"]):
                 continue
+
             price_tag = item.select_one(".price, .price_txt, .price_box")
             if price_tag:
                 price_text = price_tag.get_text(strip=True)
@@ -34,9 +35,11 @@ def check_janpara_gold(jan):
                 try:
                     price = int(price_text)
                     valid_prices.append(price)
-                except ValueError:
+                except:
                     continue
+
         return min(valid_prices) if valid_prices else None
+
     except Exception as e:
         print(f"Error for JAN {jan}: {e}")
         return None
@@ -45,14 +48,18 @@ def check_janpara_gold(jan):
 def main():
     client = get_gspread_client()
     sheet = client.open_by_key(os.environ.get("SPREADSHEET_ID")).get_worksheet(0)
-    jan_list = sheet.col_values(1)[1:]  # A列のJANコード（1行目はヘッダー）
+
+    # ★★★ これが無いと絶対に動かない ★★★
+    jan_list = sheet.col_values(1)[1:]
 
     for i, jan in enumerate(jan_list, start=2):
         print(f"行{i}のJANコード: {jan}")
         if not jan:
             continue
+
         price = check_janpara_gold(jan)
         print(f"JAN: {jan}, price: {price}")
+
         if price:
             print("書き込み実行")
             sheet.update_cell(i, 2, price)
