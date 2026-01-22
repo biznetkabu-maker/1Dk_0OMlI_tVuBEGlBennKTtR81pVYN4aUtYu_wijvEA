@@ -65,3 +65,13 @@ def main():
             sheet.update_cell(i, 2, price)
             sheet.update_cell(i, 3, "じゃんぱら(保証あり)")
             time.sleep(2)# サイトへの負荷を抑えるための休憩
+for i, jan in enumerate(jan_list, start=2):
+    print(f"行{i}のJANコード: {jan}")  # JAN取得確認
+    if not jan: continue
+    price = check_janpara_gold(jan)
+    print(f"JAN: {jan}, price: {price}")  # 価格取得確認
+    if price:
+        print("書き込み実行")  # 書き込み確認
+        sheet.update_cell(i, 2, price)
+        sheet.update_cell(i, 3, "じゃんぱら(保証あり)")
+        time.sleep(2)
