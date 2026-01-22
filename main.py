@@ -27,7 +27,6 @@ def check_janpara_gold(jan):
             text = item.get_text()
             if any(x in text for x in ["保証なし", "ジャンク", "JUNK", "難あり"]):
                 continue
-            # ✅ より柔軟な価格抽出
             price_tag = item.select_one(".price, .price_txt, .price_box")
             if price_tag:
                 price_text = price_tag.get_text(strip=True)
