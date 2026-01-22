@@ -45,14 +45,13 @@ def main():
     # A列のJANコードを取得
     jan_list = sheet.col_values(1)[1:] 
     
-    for i, jan in enumerate(jan_list, start=2):
-        if not jan: continue
-        price = check_janpara_gold(jan)
-        if price:
-            # B列に価格、C列にショップ名を書き込む
-            sheet.update_cell(i, 2, price)
-            sheet.update_cell(i, 3, "じゃんぱら(保証あり)")
-        time.sleep(2) # サイトへの負荷を抑えるための休憩
-
 if __name__ == "__main__":
     main()
+for i, jan in enumerate(jan_list, start=2):
+    if not jan: continue
+    price = check_janpara_gold(jan)
+    print(f"JAN: {jan}, price: {price}")  # ← 追加
+    if price:
+        sheet.update_cell(i, 2, price)
+        sheet.update_cell(i, 3, "じゃんぱら(保証あり)")
+time.sleep(2) # サイトへの負荷を抑えるための休憩
