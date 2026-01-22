@@ -16,28 +16,30 @@ def get_gspread_client():
 
 # じゃんぱらで「保証あり品」の最安価格を取得
 def check_janpara_gold(jan):
-    url = f"https://www.janpara.co.jp/sale/search/result/?KEYWORDS={jan}"
-    try:
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        items = soup.find_all(class_="item_list")
-
-        valid_prices = []
-        for item in items:
-            text = item.get_text()
-            #if any(x in text for x in ["保証なし", "ジャンク", "JUNK", "難あり"]):
-            #    continue
-
-            price_tag = item.select_one(".item_price, .price_detail, .price")
-            if price_tag:
-                price_text = price_tag.get_text(strip=True)
-                price_text = price_text.replace("¥", "").replace(",", "").replace("円", "")
-                try:
-                    price = int(price_text)
-                    valid_prices.append(price)
-                except:
-                    continue
-
+   # 19行目：検索URLをシンプルに変更
+        url = f"https://www.janpara.co.jp/sale/search/result/?KEYWORDS={jan}"
+        try:
+            res = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}, timeout=10)
+            soup = BeautifulSoup(res.text, 'html.parser')
+            
+            # 商品リストの枠を探す
+            items = soup.find_all(class_="item_list")
+            
+            valid_prices = []
+            for item in items:
+                # 31行目付近：価格の場所を広範囲に探す
+                price_tag = item.select_one(".item_price, .price_detail, .price")
+                if price_tag:
+                    price_text = price_tag.get_text(strip=True)
+                    price_text = price_text.replace("￥", "").replace(",", "").replace("円", "")
+                    try:
+                        price = int(price_text)
+                        valid_prices.append(price)
+                    except:
+                        continue
+            
+            # 最安値を返す（見つからない場合はNone）
+            return min(valid_prices) if valid_prices else None
         return min(valid_prices) if valid_prices else None
 
     except Exception as e:
