@@ -16,25 +16,30 @@ def get_gspread_client():
 
 # じゃんぱらで安い「保証あり品」を探す命令
 def check_janpara_gold(jan):
-    # CHKOUTRE=ON で通販在庫ありに限定
     url = f"https://www.janpara.co.jp/sale/search/result/?KEYWORDS={jan}&CHKOUTRE=ON"
     try:
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         soup = BeautifulSoup(res.text, 'html.parser')
         items = soup.find_all(class_="item_list")
-        
+
         valid_prices = []
         for item in items:
             text = item.get_text()
-            # 保証なし・ジャンク品を排除
             if any(x in text for x in ["保証なし", "ジャンク", "JUNK", "難あり"]):
                 continue
-            price_tag = item.find(class_="price")
+            # ✅ より柔軟な価格抽出
+            price_tag = item.select_one(".price, .price_txt, .price_box")
             if price_tag:
-                price = int(price_tag.get_text(strip=True).replace("￥", "").replace(",", ""))
-                valid_prices.append(price)
+                price_text = price_tag.get_text(strip=True)
+                price_text = price_text.replace("¥", "").replace(",", "").replace("円", "")
+                try:
+                    price = int(price_text)
+                    valid_prices.append(price)
+                except ValueError:
+                    continue
         return min(valid_prices) if valid_prices else None
-    except:
+    except Exception as e:
+        print(f"Error for JAN {jan}: {e}")
         return None
 
 # メインの実行処理
