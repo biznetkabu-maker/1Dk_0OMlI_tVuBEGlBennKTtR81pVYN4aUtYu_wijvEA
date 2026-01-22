@@ -1,7 +1,6 @@
 import os
 import json
 import requests
-from bs4 import BeautifulSoup
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import time
@@ -14,43 +13,37 @@ def get_gspread_client():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
-# 共通ヘッダー：本物のブラウザになりすます
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
-}
-
-def fetch_janpara(jan):
-    url = f"https://www.janpara.co.jp/sale/search/result/?KEYWORDS={jan}&CHKOUTRE=ON"
+# 1. 楽天API：価格も同時に取得するように改良（最も確実）
+def fetch_rakuten_lowest(jan):
+    app_id = os.environ.get("RAKUTEN_APP_ID")
+    url = f"https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601?format=json&keyword={jan}&applicationId={app_id}&sort=%2BitemPrice"
     try:
-        res = requests.get(url, headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        # 価格タグのクラス名が動的に変わる可能性があるため、複数のパターンで抽出
-        price_tags = soup.select(".item_price, .price_detail, .price")
-        prices = []
-        for p in price_tags:
-            if "品切れ" in p.parent.get_text(): continue
-            num = "".join(re.findall(r'\d+', p.get_text()))
-            if num: prices.append(int(num))
-        return min(prices) if prices else None
+        res = requests.get(url, timeout=10)
+        data = res.json()
+        if data.get("Items"):
+            # 最安値と商品名を取得
+            price = data["Items"][0]["Item"]["itemPrice"]
+            name = data["Items"][0]["Item"]["itemName"][:20]
+            return price, name
     except:
-        return None
+        pass
+    return None, None
 
-def fetch_iosis(jan):
-    url = f"https://iosys.co.jp/items?q={jan}"
+# 2. メルカリの検索結果から相場を推測（ブロックに強い）
+def fetch_mercari_price(jan):
+    # メルカリの公開検索用URL（非公式だが比較的安定）
+    url = f"https://jp.mercari.com/search?keyword={jan}&status=on_sale"
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
     try:
-        # イオシスはブロックが厳しいためセッションを維持
-        session = requests.Session()
-        res = session.get(url, headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        price_tags = soup.select(".item-list__price, .price")
-        prices = []
-        for p in price_tags:
-            num = "".join(re.findall(r'\d+', p.get_text()))
-            if num: prices.append(int(num))
-        return min(prices) if prices else None
+        res = requests.get(url, headers=headers, timeout=15)
+        # 価格情報を正規表現で無理やり抜き出す
+        prices = re.findall(r'price\\":(\d+)', res.text)
+        if prices:
+            valid_prices = [int(p) for p in prices if int(p) > 1000]
+            return min(valid_prices)
     except:
-        return None
+        pass
+    return None
 
 def main():
     client = get_gspread_client()
@@ -59,25 +52,29 @@ def main():
     
     for i, jan in enumerate(jan_list, start=2):
         print(f"--- 行{i} 処理開始: {jan} ---")
-        if not jan or len(str(jan)) < 10: continue
+        if not jan: continue
         
-        price_jan = fetch_janpara(jan)
-        time.sleep(2) # サイトへの負荷を下げてブロックを回避
-        price_io = fetch_iosis(jan)
+        # まずは楽天APIで最安値を探す（APIなので100%ブロックされない）
+        r_price, r_name = fetch_rakuten_lowest(jan)
+        print(f"楽天最安値: {r_price}")
         
-        print(f"じゃんぱら: {price_jan}, イオシス: {price_io}")
+        # 補助としてメルカリ相場も見る
+        m_price = fetch_mercari_price(jan)
+        print(f"メルカリ相場: {m_price}")
         
-        valid = [p for p in [price_jan, price_io] if p is not None]
-        if valid:
-            final_p = min(valid)
-            source = "じゃんぱら" if final_p == price_jan else "イオシス"
-            sheet.update_cell(i, 2, final_p)
-            sheet.update_cell(i, 3, f"{source}在庫あり")
-            print(f"書き込み成功: {final_p}")
+        # スプレッドシートへ書き込み
+        if r_price:
+            sheet.update_cell(i, 2, r_price)
+            sheet.update_cell(i, 3, f"楽天最安({r_name})")
+            print(f"書き込み完了: {r_price}")
+        elif m_price:
+            sheet.update_cell(i, 2, m_price)
+            sheet.update_cell(i, 3, "メルカリ在庫あり")
+            print(f"書き込み完了: {m_price}")
         else:
-            sheet.update_cell(i, 3, "在庫なし（またはブロック）")
+            sheet.update_cell(i, 3, "市場在庫なし")
         
-        time.sleep(3)
+        time.sleep(2)
 
 if __name__ == "__main__":
     main()
