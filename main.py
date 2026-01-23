@@ -20,7 +20,7 @@ async def update_spreadsheet(data_list):
         key_json = json.loads(os.environ["GSPREAD_SERVICE_ACCOUNT"])
         creds = Credentials.from_service_account_info(key_json, scopes=scope)
         client = gspread.authorize(creds)
-        # スプレッドシート名とタブ名が正しいか確認してください
+        # スプレッドシート名を確認
         sheet = client.open("Indevia.system").worksheet("02_Purchase_Control")
         
         rows = [[item['jan'], item['price'], item['shop'], item['url'], '', '', '', '', '', item['name']] for item in data_list]
@@ -50,7 +50,7 @@ async def get_shop_data(page, shop_name, url, item_sel, name_sel, price_sel, key
     return results
 
 async def main():
-    # 検索したいキーワード（今はテスト用が入っています）
+    # 検索したいJANコード（例としてiPhone15等の番号を入れています）
     keyword = "4549995423319" 
     
     async with async_playwright() as p:
@@ -59,7 +59,7 @@ async def main():
         page = await context.new_page()
         
         all_res = []
-        # 各ショップを巡回
+        # 中古ショップを順番に調査
         all_res.extend(await get_shop_data(page, "じゃんぱら", f"https://www.janpara.co.jp/sale/search/detail/?KEYWORDS={keyword}", ".search_result_item", ".item_name", ".price", keyword))
         all_res.extend(await get_shop_data(page, "ハードオフ", f"https://netmall.hardoff.co.jp/search/?q={keyword}", ".p-result-card", ".p-result-card__title", ".p-result-card__price", keyword))
 
