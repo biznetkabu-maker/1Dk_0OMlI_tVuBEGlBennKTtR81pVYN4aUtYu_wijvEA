@@ -17,7 +17,7 @@ async def update_spreadsheet(data_list):
     """スプレッドシートへの追記"""
     try:
         scope = ['https://www.googleapis.com/auth/spreadsheets']
-        # image_02f0b1.png で設定した新しい名前を使用します
+        # あなたが image_02f0b1.png で設定した名前を使用します
         key_json = json.loads(os.environ["GSPREAD_SERVICE_ACCOUNT"])
         creds = Credentials.from_service_account_info(key_json, scopes=scope)
         client = gspread.authorize(creds)
@@ -48,11 +48,11 @@ async def get_shop_data(page, shop_name, url, item_sel, name_sel, price_sel, key
                 price = int(''.join(filter(str.isdigit, price_text)))
                 results.append({'jan': keyword, 'price': price, 'shop': shop_name, 'url': url, 'name': name})
     except:
-        print(f"⚠️ {shop_name} で在庫なし、または取得失敗")
+        print(f"⚠️ {shop_name} で調査エラーまたは在庫なし")
     return results
 
 async def main():
-    # テスト用の商品番号
+    # 今回調査するテスト用のJANコード
     keyword = "4549995423319" 
     
     async with async_playwright() as p:
@@ -62,7 +62,7 @@ async def main():
         
         all_res = []
         print(f"--- 調査開始: {keyword} ---")
-        # じゃんぱら・ハードオフを調査
+        # 中古ショップ（じゃんぱら・ハードオフ）を調査
         all_res.extend(await get_shop_data(page, "じゃんぱら", f"https://www.janpara.co.jp/sale/search/detail/?KEYWORDS={keyword}", ".search_result_item", ".item_name", ".price", keyword))
         all_res.extend(await get_shop_data(page, "ハードオフ", f"https://netmall.hardoff.co.jp/search/?q={keyword}", ".p-result-card", ".p-result-card__title", ".p-result-card__price", keyword))
 
