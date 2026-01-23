@@ -20,15 +20,17 @@ async def update_spreadsheet(data_list):
         key_json = json.loads(os.environ["GSPREAD_SERVICE_ACCOUNT"])
         creds = Credentials.from_service_account_info(key_json, scopes=scope)
         client = gspread.authorize(creds)
+        # スプレッドシート名とタブ名が正しいか確認してください
         sheet = client.open("Indevia.system").worksheet("02_Purchase_Control")
+        
         rows = [[item['jan'], item['price'], item['shop'], item['url'], '', '', '', '', '', item['name']] for item in data_list]
         sheet.append_rows(rows)
-        print(f"✅ {len(rows)}件を追記しました。")
+        print(f"✅ {len(rows)}件をスプレッドシートに追記しました。")
     except Exception as e:
         print(f"❌ 更新エラー: {e}")
 
 async def get_shop_data(page, shop_name, url, item_sel, name_sel, price_sel, keyword):
-    await asyncio.sleep(random.uniform(2, 5)) # ランダム待機
+    await asyncio.sleep(random.uniform(2, 5)) # 紳士的待機
     results = []
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=20000)
@@ -40,23 +42,31 @@ async def get_shop_data(page, shop_name, url, item_sel, name_sel, price_sel, key
             if n_el and p_el:
                 name = (await n_el.inner_text()).strip()
                 if any(word in name for word in NG_WORDS): continue
-                price = int(''.join(filter(str.isdigit, await p_el.inner_text())))
+                price_text = await p_el.inner_text()
+                price = int(''.join(filter(str.isdigit, price_text)))
                 results.append({'jan': keyword, 'price': price, 'shop': shop_name, 'url': url, 'name': name})
     except:
         print(f"⚠️ {shop_name} 取得失敗")
     return results
 
 async def main():
-    keyword = "4549995423319" # テスト用の商品番号
+    # 検索したいキーワード（今はテスト用が入っています）
+    keyword = "4549995423319" 
+    
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(user_agent=random.choice(USER_AGENTS))
         page = await context.new_page()
+        
         all_res = []
+        # 各ショップを巡回
         all_res.extend(await get_shop_data(page, "じゃんぱら", f"https://www.janpara.co.jp/sale/search/detail/?KEYWORDS={keyword}", ".search_result_item", ".item_name", ".price", keyword))
         all_res.extend(await get_shop_data(page, "ハードオフ", f"https://netmall.hardoff.co.jp/search/?q={keyword}", ".p-result-card", ".p-result-card__title", ".p-result-card__price", keyword))
+
         if all_res:
             await update_spreadsheet(all_res)
+        else:
+            print("対象商品が見つかりませんでした。")
         await browser.close()
 
 if __name__ == "__main__":
