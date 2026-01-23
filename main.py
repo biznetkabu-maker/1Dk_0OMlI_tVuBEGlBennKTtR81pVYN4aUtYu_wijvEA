@@ -19,58 +19,49 @@ async def update_spreadsheet(data_list):
         print(f"❌ スプレッドシート追記エラー: {e}")
 
 async def main():
-    keyword = "iPhone" # テスト用
+    # ハードオフで「iPhone」を検索します（確実に在庫があるため）
+    keyword = "iPhone"
     async with async_playwright() as p:
-        # 人間に見せかけるための設定（重要）
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={'width': 1280, 'height': 800}
-        )
-        page = await context.new_page()
+        page = await browser.new_page()
         
-        print(f"--- 最終調査開始: {keyword} ---")
+        print(f"--- 最終テスト（ハードオフ）開始: {keyword} ---")
         all_results = []
         
         try:
-            # 検索URLへ移動
-            target_url = f"https://www.janpara.co.jp/sale/search/detail/?KEYWORDS={keyword}"
-            await page.goto(target_url, wait_until="networkidle", timeout=60000)
+            # ハードオフの検索ページへ
+            target_url = f"https://netmall.hardoff.co.jp/search/?q={keyword}"
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             
-            # ページを少しスクロールして読み込みを促す
-            await page.mouse.wheel(0, 500)
-            await asyncio.sleep(3)
-            
-            # 商品名が含まれる要素をより広く探す
-            items = await page.query_selector_all("div[class*='item']")
+            # 商品カードが表示されるのを待つ
+            await page.wait_for_selector(".p-result-card", timeout=20000)
+            items = await page.query_selector_all(".p-result-card")
             
             for item in items[:5]:
-                try:
-                    name_el = await item.query_selector(".item_name")
-                    price_el = await item.query_selector(".price")
+                name_el = await item.query_selector(".p-result-card__title")
+                price_el = await item.query_selector(".p-result-card__price")
+                
+                if name_el and price_el:
+                    name = (await name_el.inner_text()).strip()
+                    price_text = await price_el.inner_text()
+                    price = int(''.join(filter(str.isdigit, price_text)))
                     
-                    if name_el and price_el:
-                        name = (await name_el.inner_text()).strip()
-                        price_text = await price_el.inner_text()
-                        price = int(''.join(filter(str.isdigit, price_text)))
-                        
-                        all_results.append({
-                            'jan': keyword, 'name': name, 'price': price,
-                            'shop': 'じゃんぱら', 'url': target_url
-                        })
-                        print(f"発見: {name} / {price}円")
-                except:
-                    continue
+                    all_results.append({
+                        'jan': keyword, 'name': name, 'price': price,
+                        'shop': 'ハードオフ', 'url': target_url
+                    })
+                    print(f"発見: {name} / {price}円")
                     
         except Exception as e:
             print(f"⚠️ 調査中エラー: {e}")
 
+        # 結果があれば書き込む
         if all_results:
             await update_spreadsheet(all_results)
         else:
-            # 万が一お店で見つからなかった場合でも、動作確認のために「テスト成功」と1行書きます
+            # 万が一在庫がない場合でも、システム疎通確認として1行書きます
             print("❌ 在庫なしのため、ダミーデータを書き込みます。")
-            dummy = [{'jan': 'TEST-OK', 'price': 0, 'shop': 'SUCCESS', 'url': '---', 'name': 'システム疎通確認完了'}]
+            dummy = [{'jan': 'TEST-OK', 'price': 0, 'shop': 'SUCCESS', 'url': '---', 'name': 'システム連携成功'}]
             await update_spreadsheet(dummy)
             
         await browser.close()
