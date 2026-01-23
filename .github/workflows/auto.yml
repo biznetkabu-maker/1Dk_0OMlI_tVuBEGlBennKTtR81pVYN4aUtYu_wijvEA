@@ -21,7 +21,5 @@ jobs:
           pip install playwright gspread google-auth
           playwright install-deps chromium
           playwright install chromium
-      - name: Run Scraper
-        env:
-          GSPREAD_SERVICE_ACCOUNT: ${{ secrets.GSPREAD_SERVICE_ACCOUNT }}
-        run: python main.py
+          pip install -r requirements.txt
+          playwright install chromium
