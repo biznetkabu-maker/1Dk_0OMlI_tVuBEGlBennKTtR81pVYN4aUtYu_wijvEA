@@ -6,7 +6,6 @@ from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
 
 async def safe_text(item, selector):
-    # エラーで止まらないようにtry-exceptを追加
     try:
         el = await item.query_selector(selector)
         if not el:
@@ -30,7 +29,6 @@ async def update_spreadsheet(data_list):
         creds = Credentials.from_service_account_info(key_json, scopes=scope)
         client = gspread.authorize(creds)
 
-        # ワークシート名を再確認してください
         sheet = client.open("Indevia.system").worksheet("02_Purchase_Control")
 
         rows = [
@@ -50,11 +48,16 @@ async def update_spreadsheet(data_list):
 async def main():
     keyword = "iPhone"
     async with async_playwright() as p:
-        # 【修正1】headless=False にしてブラウザ画面を表示させる
-        browser = await p.chromium.launch(headless=False, slow_mo=1000) 
-        page = await browser.new_page()
-        print("--- ブラウザ起動 ---")
-
+        # 【重要修正】headless=Trueに戻し、User-Agentを偽装してボット判定を回避します
+        browser = await p.chromium.launch(headless=True)
+        
+        # 一般的なブラウザ（Chrome on Windows）のふりをする設定
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+        
+        print("--- スクレイピング開始（Headlessモード） ---")
         all_results = []
 
         try:
@@ -63,34 +66,39 @@ async def main():
             
             await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             
-            # 【修正2】最新のセレクタ構造に合わせて調整（汎用的なクラスに変更の可能性あり）
-            # もし .p-result-card が見つからない場合、タイムアウトまで待機してしまいます
-            # ここではまずページが正しく読み込まれたかタイトルなどを確認します
-            print("ページ読み込み完了。要素を探します...")
+            # ページタイトルを表示して、正しくアクセスできたか確認
+            title = await page.title()
+            print(f"ページタイトル: {title}")
 
             # 念のため少し待機
             await page.wait_for_timeout(3000)
 
-            # NOTE: 現在のハードオフNetmallの商品カードのクラス名を確認する必要があります。
-            # 以下は既存コードのままですが、もしここが古い場合はブラウザでF12キーを押し、
-            # 商品カードの正しいクラス名を調べて書き換える必要があります。
-            # 例: div[class*="item-card"] など
+            # --- デバッグ用：スクリーンショットを保存 ---
+            # これで「なぜデータが取れないか」を目視確認できます（ファイル出力される場合）
+            await page.screenshot(path="debug_page.png")
+            print("📸 現在のページ状態を 'debug_page.png' に保存しました")
+
+            # HTMLの一部を出力して、構造を確認
+            content = await page.content()
+            if "アクセスが拒否されました" in content or "Forbidden" in title:
+                print("⚠️ サイトからアクセスブロックされています。")
             
-            # セレクタが見つかるかトライ（タイムアウトを短くして確認しやすくする）
-            try:
-                await page.wait_for_selector(".p-result-card", timeout=10000)
-                items = await page.query_selector_all(".p-result-card")
+            # セレクタ探索
+            selector = ".p-result-card" # 古い可能性が高い
+            # selector = ".item-card" # ← もしクラス名が変わっていたらここを変える候補
+
+            items = await page.query_selector_all(selector)
+            
+            if len(items) == 0:
+                print(f"⚠️ 指定したクラス名 ({selector}) が見つかりませんでした。")
+                print("HTML構造が変わっているか、検索結果が0件か、ロードが完了していません。")
+            else:
                 print(f"検索結果: {len(items)} 件見つかりました")
-            except:
-                print("⚠️ 指定したクラス名 (.p-result-card) が見つかりませんでした。")
-                print("ブラウザ画面を見て、商品一覧が表示されているか、ログイン画面になっていないか確認してください。")
-                items = []
 
             for item in items[:3]:
                 name = await safe_text(item, ".p-result-card__title")
                 price_text = await safe_text(item, ".p-result-card__price")
                 
-                # 価格の抽出ロジック（￥マークやカンマを除去）
                 price = 0
                 if price_text:
                     import re
@@ -101,7 +109,7 @@ async def main():
                 print(f"取得データ: {name} / {price}円")
 
                 all_results.append({
-                    'jan': keyword, # JANの代わりに検索ワードを入れています
+                    'jan': keyword,
                     'name': name,
                     'price': price,
                     'shop': 'ハードオフ',
@@ -109,23 +117,23 @@ async def main():
                 })
 
         except Exception as e:
-            print(f"⚠️ スクレイピングエラー詳細: {e}")
-            # エラー時も書き込み処理へ進む
+            print(f"⚠️ エラー発生: {e}")
+            import traceback
+            traceback.print_exc()
 
+        # データが取れなかった場合
         if not all_results:
-            print("データが取得できなかったため、テストデータをセットします")
+            print("データなしのため、スプレッドシートには書き込みません（またはエラーログを記録します）")
+            # デバッグ用に失敗ログを残すなら以下を有効化
             all_results.append({
-                'jan': 'TEST-FAIL',
-                'name': '取得失敗（ブラウザ画面を確認してください）',
+                'jan': 'DEBUG-LOG',
+                'name': f'取得失敗: タイトル[{title}]',
                 'price': 0,
                 'shop': 'SYSTEM',
                 'url': '---'
             })
 
         await update_spreadsheet(all_results)
-        
-        # 確認のために少し待ってから閉じる
-        await page.wait_for_timeout(5000) 
         await browser.close()
         print("--- 処理終了 ---")
 
