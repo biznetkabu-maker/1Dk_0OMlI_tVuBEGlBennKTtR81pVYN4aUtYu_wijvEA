@@ -1,18 +1,10 @@
 import asyncio
 import os
 import json
+import re
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.async_api import async_playwright
-
-async def safe_text(item, selector):
-    try:
-        el = await item.query_selector(selector)
-        if not el:
-            return ""
-        return (await el.inner_text()).strip()
-    except:
-        return ""
 
 async def update_spreadsheet(data_list):
     try:
@@ -29,6 +21,7 @@ async def update_spreadsheet(data_list):
         creds = Credentials.from_service_account_info(key_json, scopes=scope)
         client = gspread.authorize(creds)
 
+        # ワークシート名を再確認してください
         sheet = client.open("Indevia.system").worksheet("02_Purchase_Control")
 
         rows = [
@@ -39,8 +32,11 @@ async def update_spreadsheet(data_list):
             for item in data_list
         ]
 
-        sheet.append_rows(rows)
-        print(f"✅ スプレッドシートに {len(rows)} 件書き込みました！")
+        if rows:
+            sheet.append_rows(rows)
+            print(f"✅ スプレッドシートに {len(rows)} 件書き込みました！")
+        else:
+            print("⚠️ 書き込むデータがありませんでした。")
 
     except Exception as e:
         print(f"❌ スプレッドシート追記エラー: {e}")
@@ -48,16 +44,14 @@ async def update_spreadsheet(data_list):
 async def main():
     keyword = "iPhone"
     async with async_playwright() as p:
-        # 【重要修正】headless=Trueに戻し、User-Agentを偽装してボット判定を回避します
+        # headless=True, User-Agent偽装あり
         browser = await p.chromium.launch(headless=True)
-        
-        # 一般的なブラウザ（Chrome on Windows）のふりをする設定
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
         
-        print("--- スクレイピング開始（Headlessモード） ---")
+        print("--- スクレイピング開始（汎用モード） ---")
         all_results = []
 
         try:
@@ -66,71 +60,93 @@ async def main():
             
             await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             
-            # ページタイトルを表示して、正しくアクセスできたか確認
+            # ページ読み込み後の安定化待機
+            await page.wait_for_timeout(5000)
+            
             title = await page.title()
             print(f"ページタイトル: {title}")
 
-            # 念のため少し待機
-            await page.wait_for_timeout(3000)
-
-            # --- デバッグ用：スクリーンショットを保存 ---
-            # これで「なぜデータが取れないか」を目視確認できます（ファイル出力される場合）
-            await page.screenshot(path="debug_page.png")
-            print("📸 現在のページ状態を 'debug_page.png' に保存しました")
-
-            # HTMLの一部を出力して、構造を確認
-            content = await page.content()
-            if "アクセスが拒否されました" in content or "Forbidden" in title:
-                print("⚠️ サイトからアクセスブロックされています。")
+            # --- 新ロジック: クラス名に頼らず、リンク構造から商品を探す ---
+            print("商品データを探索中...")
             
-            # セレクタ探索
-            selector = ".p-result-card" # 古い可能性が高い
-            # selector = ".item-card" # ← もしクラス名が変わっていたらここを変える候補
-
-            items = await page.query_selector_all(selector)
+            # ページ内のすべてのリンク(aタグ)を取得
+            links = await page.query_selector_all('a')
+            print(f"ページ内のリンク総数: {len(links)}")
             
-            if len(items) == 0:
-                print(f"⚠️ 指定したクラス名 ({selector}) が見つかりませんでした。")
-                print("HTML構造が変わっているか、検索結果が0件か、ロードが完了していません。")
-            else:
-                print(f"検索結果: {len(items)} 件見つかりました")
-
-            for item in items[:3]:
-                name = await safe_text(item, ".p-result-card__title")
-                price_text = await safe_text(item, ".p-result-card__price")
+            valid_items = []
+            
+            for link in links:
+                # リンクの中のテキストを取得
+                text = await link.inner_text()
+                href = await link.get_attribute('href')
                 
+                # 商品カードの条件推測:
+                # 1. テキストに「円」が含まれている（価格表示がある）
+                # 2. リンク先が存在し、適度に長い（詳細ページへのリンク）
+                # 3. テキストがある程度の長さがある（商品名などが含まれている）
+                if text and "円" in text and href and len(href) > 5:
+                    # 重複除外やノイズ除去のため、テキストの長さで簡易フィルタ
+                    if len(text) > 10:
+                        valid_items.append(link)
+                        # デバッグ用にテキストの一部を表示
+                        # print(f"候補発見: {text[:20]}...")
+
+            print(f"商品と思われるリンク数: {len(valid_items)}")
+
+            # 上位3件を処理
+            for item in valid_items[:3]:
+                raw_text = await item.inner_text()
+                # 余分な空白を除去
+                lines = [line.strip() for line in raw_text.split('\n') if line.strip()]
+                
+                # --- 情報抽出ロジック ---
+                name = "名称不明"
                 price = 0
-                if price_text:
-                    import re
-                    nums = re.findall(r'\d+', price_text)
+                
+                # 一番長い行を「商品名」と仮定する
+                if lines:
+                    name = max(lines, key=len)
+                
+                # 「円」を含む行、または数字だけの行から価格を探す
+                for line in lines:
+                    # 数字のみを抽出
+                    nums = re.findall(r'\d+', line)
                     if nums:
-                        price = int("".join(nums))
+                        val = int("".join(nums))
+                        # 価格としてありえそうな値（例: 100円以上）かつ、「円」が含まれる行を優先
+                        if val > 100 and ("円" in line or "税込" in line):
+                            price = val
+                            break
+                        # 見つからない場合は数字だけで判定（バックアップ）
+                        elif val > 100 and price == 0:
+                            price = val
 
-                print(f"取得データ: {name} / {price}円")
+                print(f"📦 取得データ: {name[:30]}... / {price}円")
 
-                all_results.append({
-                    'jan': keyword,
-                    'name': name,
-                    'price': price,
-                    'shop': 'ハードオフ',
-                    'url': target_url
-                })
+                if price > 0:
+                    all_results.append({
+                        'jan': keyword,
+                        'name': name,
+                        'price': price,
+                        'shop': 'ハードオフ',
+                        'url': target_url
+                    })
 
         except Exception as e:
             print(f"⚠️ エラー発生: {e}")
             import traceback
             traceback.print_exc()
 
-        # データが取れなかった場合
-        if not all_results:
-            print("データなしのため、スプレッドシートには書き込みません（またはエラーログを記録します）")
-            # デバッグ用に失敗ログを残すなら以下を有効化
+        # データ取得数確認
+        if len(all_results) == 0:
+            print("⚠️ データが見つかりませんでした。HTML構造が大幅に異なっている可能性があります。")
+            # 念のためテストデータを送る（接続確認用）
             all_results.append({
-                'jan': 'DEBUG-LOG',
-                'name': f'取得失敗: タイトル[{title}]',
+                'jan': 'TEST-NODATA',
+                'name': 'データ取得なし(HTML構造要確認)',
                 'price': 0,
                 'shop': 'SYSTEM',
-                'url': '---'
+                'url': target_url
             })
 
         await update_spreadsheet(all_results)
