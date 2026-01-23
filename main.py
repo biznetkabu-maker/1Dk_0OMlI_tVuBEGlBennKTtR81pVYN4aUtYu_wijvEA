@@ -7,7 +7,10 @@ from playwright.async_api import async_playwright
 
 async def update_spreadsheet(data_list):
     try:
-        scope = ['https://www.googleapis.com/auth/spreadsheets']
+        scope = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive'
+]
         key_json = json.loads(os.environ["GSPREAD_SERVICE_ACCOUNT"])
         creds = Credentials.from_service_account_info(key_json, scopes=scope)
         client = gspread.authorize(creds)
